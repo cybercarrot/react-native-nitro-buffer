@@ -158,7 +158,7 @@ std::shared_ptr<ArrayBuffer> HybridNitroBuffer::allocUnsafe(double size) {
 double HybridNitroBuffer::byteLength(const std::string &string,
                                      const std::string &encoding) {
   if (encoding == "hex") {
-    return string.length() / 2;
+    return (double)(string.length() / 2);
   } else if (encoding == "base64") {
     size_t len = string.length();
     if (len == 0)
@@ -168,10 +168,33 @@ double HybridNitroBuffer::byteLength(const std::string &string,
       padding++;
     if (len > 1 && string[len - 2] == '=')
       padding++;
-    return (len * 3) / 4 - padding;
+    return (double)((len * 3) / 4 - padding);
+  } else if (encoding == "binary" || encoding == "latin1") {
+    // Each character in the original string (0-255) maps to one byte.
+    // The input 'string' is UTF-8 encoded. We count Unicode code points.
+    size_t count = 0;
+    size_t i = 0;
+    size_t len = string.length();
+    const char *str = string.c_str();
+    while (i < len) {
+      unsigned char byte = static_cast<unsigned char>(str[i]);
+      if (byte <= 0x7F) {
+        i += 1;
+      } else if ((byte & 0xE0) == 0xC0) {
+        i += 2;
+      } else if ((byte & 0xF0) == 0xE0) {
+        i += 3;
+      } else if ((byte & 0xF8) == 0xF0) {
+        i += 4;
+      } else {
+        i += 1;
+      }
+      count++;
+    }
+    return (double)count;
   }
   // utf8 (default)
-  return string.length();
+  return (double)string.length();
 }
 
 double HybridNitroBuffer::write(const std::shared_ptr<ArrayBuffer> &buffer,
@@ -191,7 +214,7 @@ double HybridNitroBuffer::write(const std::shared_ptr<ArrayBuffer> &buffer,
     size_t strLen = string.length();
     size_t actualWrite = std::min(toWrite, strLen);
     memcpy(data + start, string.c_str(), actualWrite);
-    return actualWrite;
+    return (double)actualWrite;
   } else if (encoding == "hex") {
     size_t strLen = string.length();
     size_t bytesCount = strLen / 2;
@@ -202,19 +225,58 @@ double HybridNitroBuffer::write(const std::shared_ptr<ArrayBuffer> &buffer,
           (unsigned char)strtol(byteString.c_str(), nullptr, 16);
       data[start + i] = byte;
     }
-    return actualWrite;
+    return (double)actualWrite;
   } else if (encoding == "base64") {
     std::vector<unsigned char> decoded = base64_decode(string);
     size_t actualWrite = std::min(toWrite, decoded.size());
     memcpy(data + start, decoded.data(), actualWrite);
-    return actualWrite;
+    return (double)actualWrite;
+  } else if (encoding == "binary" || encoding == "latin1") {
+    // Decode UTF-8 string back to raw bytes (0x00-0xFF)
+    size_t written = 0;
+    size_t i = 0;
+    const char *str = string.c_str();
+    size_t utf8Len = string.length();
+
+    while (i < utf8Len && written < toWrite) {
+      unsigned char byte = static_cast<unsigned char>(str[i]);
+      uint32_t codePoint = 0;
+      size_t seqLen = 0;
+
+      if (byte <= 0x7F) {
+        codePoint = byte;
+        seqLen = 1;
+      } else if ((byte & 0xE0) == 0xC0 && i + 1 < utf8Len) {
+        codePoint = ((byte & 0x1F) << 6) |
+                    (static_cast<unsigned char>(str[i + 1]) & 0x3F);
+        seqLen = 2;
+      } else if ((byte & 0xF0) == 0xE0 && i + 2 < utf8Len) {
+        codePoint = ((byte & 0x0F) << 12) |
+                    ((static_cast<unsigned char>(str[i + 1]) & 0x3F) << 6) |
+                    (static_cast<unsigned char>(str[i + 2]) & 0x3F);
+        seqLen = 3;
+      } else if ((byte & 0xF8) == 0xF0 && i + 3 < utf8Len) {
+        codePoint = ((byte & 0x07) << 18) |
+                    ((static_cast<unsigned char>(str[i + 1]) & 0x3F) << 12) |
+                    ((static_cast<unsigned char>(str[i + 2]) & 0x3F) << 6) |
+                    (static_cast<unsigned char>(str[i + 3]) & 0x3F);
+        seqLen = 4;
+      } else {
+        codePoint = byte;
+        seqLen = 1;
+      }
+
+      data[start + written++] = static_cast<uint8_t>(codePoint & 0xFF);
+      i += seqLen;
+    }
+    return (double)written;
   }
 
   // Fallback utf8
   size_t strLen = string.length();
   size_t actualWrite = std::min(toWrite, strLen);
   memcpy(data + start, string.c_str(), actualWrite);
-  return actualWrite;
+  return (double)actualWrite;
 }
 
 // UTF-8 replacement character (U+FFFD) encoded as UTF-8
