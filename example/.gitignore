@@ -5,6 +5,7 @@
 # Xcode
 #
 build/
+build-targeted/
 *.pbxuser
 !default.pbxuser
 *.mode1v3
